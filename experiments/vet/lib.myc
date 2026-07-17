@@ -1,0 +1,89 @@
+// nodule: std.numerics
+// `std.numerics` — the honest ε/δ carrier and meet-composition surface (M-512, issue #153).
+//
+// `std.numerics` is the library home for *carrying a value together with its `Meta`-attached
+// `{Bound, GuaranteeStrength}`* ([`Approx<T>`]) and for the **meet-composition /
+// refuse-without-a-rule** posture that keeps bounds honest. The verified ε/δ kernels live in
+// `mycelium-numerics` (ADR-010); this module is their **ergonomic, never-upgrading surface**
+// (KC-3 — it adds no trusted bound algebra, it consumes it).
+//
+// # Honesty crux (C2 / VR-5)
+//
+// A helper's guarantee tag is exactly what its basis supports and is **never upgraded**: strength
+// composes by [`GuaranteeStrength::meet`] (weakest-wins), bounds propagate with **outward
+// (directed) rounding** (via `mycelium-numerics`), and an op lacking a sound rule **refuses**
+// (`Err`) rather than fabricating a bound. `Proven` is constructible **only** via a
+// [`ProvenThm`]-typed witness token — there is no other path (FR-N3, type-level; sealed module).
+//
+// # Design grounding
+//
+// - Spec: `docs/spec/stdlib/numerics.md` (§3 exported-op surface, §4 guarantee matrix)
+// - ADR-010 (the two bound kernels + shared certificate), ADR-011 (`BoundBasis` universal)
+// - `mycelium-numerics` — M-201 `::error`, M-202 `::prob`, M-203 `::cert` (Done 2026-06-09)
+// - RFC-0016 §4.1 C1–C6, §4.2 Ring-1, §4.5 guarantee matrix
+// - RFC-0001 §4.3/§4.7 (`Meta`, guarantee lattice, M-I1–M-I4)
+// - Task M-512, issue #153
+//
+// # ε-ownership (NFR-N2 — RESOLVED)
+//
+// This module is the ε-carrier home, so it now **owns** the `Declared`-strength float ε that
+// `std.math` previously held locally: [`DECLARED_FLOAT_EPS`]. `std.math` re-exports it from here
+// rather than restating it (the math.md §7-Q2 / README §5 ε-ownership FLAG). The value is a
+// **`Declared`** placeholder (`UserDeclared` basis) for the unaudited libm transcendental floor;
+// its honest upgrade to a `Proven` magnitude is owned by the kernel (ADR-010 / `mycelium-numerics`)
+// and the audited `wild`/FFI floor (M-541), reachable only via a checked basis (VR-5) — never by
+// restating a tighter number here.
+//
+// ## Ambient Representation (RFC-0012 §8-Q3)
+//
+// This crate's public API participates in the RFC-0012 ambient-representation contract:
+// the representation choice (binary/ternary/dense/VSA) is implicit at the call site but
+// always reified, queryable, and EXPLAIN-able — never a black box (C3/SC-3).
+// [Declared per RFC-0012; direction accepted in DN-07 §8-Q3; per-ring pass scheduled as M-540.]
+//
+// **For this crate (Ring 2, Tier B):** Numerics ops are representation-agnostic (the bound
+// algebra operates over floats and fixed-point values regardless of `Repr`); however, every
+// result always carries an explicit `Bound` with its `BoundBasis` — no precision is implicitly
+// reduced or silently upgraded. The `Proven` strength is reachable only via a `ProvenThm`
+// witness token; there is no ambient path to `Proven`.
+//
+// # Stability (DN-66 freeze, 2026-07-01)
+//
+// This crate's public API, as documented in `docs/spec/stdlib/numerics.md` (spec status:
+// Accepted (2026-06-20)) and asserted by its guarantee-matrix table, is the **frozen baseline** per
+// [DN-66](../../../docs/notes/DN-66-Stdlib-Stable-API-Freeze-And-Rust-Crate-Retirement-Status.md).
+// A future breaking change here needs a spec amendment + changelog entry, not a silent edit (G2).
+//
+// **Unfrozen for the gap-closure window (ADR-045, Accepted 2026-07-10):** this DN-66 freeze is
+// lifted per [ADR-045](../../../docs/adr/ADR-045-Kernel-And-Lexicon-Unfreeze-For-Early-Gap-Closure.md)
+// for a bounded window; a breaking change here still needs a spec amendment + changelog entry
+// (G2), not a silent edit — the window closes per the ADR-045 §2.4 re-freeze conditions, bound by
+// the DN-99 residual worklist.
+// It remains the RFC-0031 D6 differential-oracle reference; no `.myc` port of this module exists yet, so the D6 retirement trigger has not fired and no item here is `#[deprecated]`.
+// @summary: best-effort transpilation via mycelium-transpile (M-873). Declared,
+// unvalidated — no Mycelium parser/typechecker confirms this output; see the
+// accompanying .gap.json for every construct this pass could not express.
+nodule std.numerics;
+
+// Declared: co-emitted guarantee-lattice type — referenced in this file but not declared here and not available via a resolved batch `use` (ORACLE-R1 A2; never silent unknown-type file poison — G2/VR-5). Variants use DN-140 `*_kw` renames for the reserved lattice keywords (Exact/Proven/Empirical/Declared).
+// Declared: renamed Exact -> Exact_kw (reserved-word collision, DN-140)
+// Declared: renamed Proven -> Proven_kw (reserved-word collision, DN-140)
+// Declared: renamed Empirical -> Empirical_kw (reserved-word collision, DN-140)
+// Declared: renamed Declared -> Declared_kw (reserved-word collision, DN-140)
+type GuaranteeStrength = Exact_kw | Proven_kw | Empirical_kw | Declared_kw;
+
+// Structured refusal record for `std.numerics` helpers (C1; RFC-0013; spec §3 `NumErr`).
+//
+// Every failure mode is an explicit variant — no silent coercion, no fabricated default.
+type NumErr = BadEps | BadDelta | NoRule | NormMismatch | Overflow;
+
+impl Show[NumErr] for NumErr {
+  fn render(x: NumErr) => Bytes =
+    match x { BadEps => "BadEps", BadDelta => "BadDelta", NoRule => "NoRule", NormMismatch => "NormMismatch", Overflow => "Overflow" };
+};
+
+fn eq_NumErr(a: NumErr, b: NumErr) => Binary{1} =
+  match a { BadEps => match b { BadEps => 0b1, _ => 0b0 }, BadDelta => match b { BadDelta => 0b1, _ => 0b0 }, NoRule => match b { NoRule => 0b1, _ => 0b0 }, NormMismatch => match b { NormMismatch => 0b1, _ => 0b0 }, Overflow => match b { Overflow => 0b1, _ => 0b0 } };
+
+// Structured verdict for the tier-i re-validation checker (spec §3 `CheckErr`; RFC-0013).
+type CheckErr = Rejected(Float, Float) | Malformed;
